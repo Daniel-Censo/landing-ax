@@ -1281,10 +1281,44 @@ export const App: React.FC = () => {
                     </div>
                     <button onClick={async () => {
                         if (supabase && session) {
-                            const { error } = await supabase.from('site_settings').upsert({ 
-                                user_id: session.id, 
-                                config: siteConfig 
-                            }, { onConflict: 'user_id' });
+                            const { data: existing } = await supabase
+                                .from('site_settings')
+                                .select('id')
+                                .eq('user_id', session.id)
+                                .maybeSingle();
+                                
+                            let error;
+                            if (existing) {
+                                const { error: updateError } = await supabase
+                                    .from('site_settings')
+                                    .update({ config: siteConfig })
+                                    .eq('id', existing.id);
+                                error = updateError;
+                            } else {
+                                // Try inserting with a UUID
+                                const { error: insertError } = await supabase
+                                    .from('site_settings')
+                                    .insert({ id: crypto.randomUUID(), user_id: session.id, config: siteConfig });
+                                
+                                if (insertError && insertError.message.includes('invalid input syntax for type')) {
+                                    // It might be an integer column, let's get the max ID
+                                    const { data: maxIdData } = await supabase
+                                        .from('site_settings')
+                                        .select('id')
+                                        .order('id', { ascending: false })
+                                        .limit(1)
+                                        .maybeSingle();
+                                    
+                                    const nextId = maxIdData ? Number(maxIdData.id) + 1 : 1;
+                                    const { error: retryError } = await supabase
+                                        .from('site_settings')
+                                        .insert({ id: nextId, user_id: session.id, config: siteConfig });
+                                    error = retryError;
+                                } else {
+                                    error = insertError;
+                                }
+                            }
+
                             if (!error) alert("Impostazioni salvate correttamente!");
                             else alert("Errore nel salvataggio: " + error.message);
                         }
