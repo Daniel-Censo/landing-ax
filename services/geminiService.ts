@@ -270,11 +270,13 @@ const callGeminiWithRetry = async (fn: () => Promise<any>, maxRetries = 3): Prom
             lastError = err;
             const isTransient = err.message?.includes("503") || 
                                err.message?.includes("high demand") || 
-                               err.message?.includes("UNAVAILABLE");
+                               err.message?.includes("UNAVAILABLE") ||
+                               err.message?.includes("429") ||
+                               err.message?.includes("Too Many Requests");
             
             if (isTransient && i < maxRetries - 1) {
-                const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
-                console.warn(`Gemini API busy (503). Retrying in ${Math.round(delay)}ms... (Attempt ${i + 1}/${maxRetries})`);
+                const delay = Math.pow(2, i) * 1500 + Math.random() * 1000;
+                console.warn(`Gemini API busy/rate-limited. Retrying in ${Math.round(delay)}ms... (Attempt ${i + 1}/${maxRetries})`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 continue;
             }
@@ -806,8 +808,11 @@ export const generateActionImages = async (product: ProductDetails, styles: AIIm
     const ai = getAIInstance();
     const referenceImages = (product.images || []).filter(img => img.startsWith('data:image'));
 
-    // Eseguiamo le generazioni in parallelo per velocità e per rispettare il numero richiesto
-    const generationTasks = Array.from({ length: count }).map(async (_, i) => {
+    // Eseguiamo le generazioni in sequenza per evitare errori 429 (Too Many Requests)
+    // sui piani a pagamento che hanno limiti di concorrenza rigidi per le immagini.
+    const results: (string | null)[] = [];
+    
+    for (let i = 0; i < count; i++) {
         const style = styles[i % styles.length];
         const stylePrompts: Record<AIImageStyle, string> = {
             'lifestyle': 'Place the product in a realistic home or outdoor environment with natural lighting and human interaction.',
@@ -853,15 +858,21 @@ export const generateActionImages = async (product: ProductDetails, styles: AIIm
 
             const part = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
             if (part?.inlineData?.data) {
-                return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+                results.push(`data:${part.inlineData.mimeType};base64,${part.inlineData.data}`);
+            } else {
+                results.push(null);
             }
         } catch (err) {
             console.error(`AI Image generation task ${i} failed:`, err);
+            results.push(null);
         }
-        return null;
-    });
+        
+        // Aggiungiamo un piccolo ritardo tra una generazione e l'altra per sicurezza
+        if (i < count - 1) {
+            await new Promise(resolve => setTimeout(resolve, 1500));
+        }
+    }
 
-    const results = await Promise.all(generationTasks);
     return results.filter(img => img !== null) as string[];
 };
 
