@@ -567,10 +567,13 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (!supabase || !isSupabaseConfigured()) return;
 
+    const activeOwnerId = tenantOwnerId || session?.id || (import.meta as any).env?.VITE_OWNER_ID || 'default';
+    const channelName = `online-users-${activeOwnerId}`;
+
     // Stable ID for the current presence entry
     const presenceId = Math.random().toString(36).substring(7);
 
-    const channel = supabase.channel('online-users', {
+    const channel = supabase.channel(channelName, {
       config: {
         presence: {
           key: presenceId,
@@ -630,7 +633,7 @@ export const App: React.FC = () => {
     return () => {
       channel.unsubscribe();
     };
-  }, [supabase, session]);
+  }, [supabase, session, tenantOwnerId]);
 
   const handleLogoClick = () => {
       if (view !== 'home') {
