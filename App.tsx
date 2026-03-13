@@ -512,8 +512,10 @@ export const App: React.FC = () => {
     vatNumber: `${Math.floor(Math.random()*90000000000 + 10000000000)}`, // Random IT P.IVA
     email: `info@bestoffers.it`,
     browserTitle: 'A.T.',
-    adminPanelName: 'Agdid Admin'
+    adminPanelName: 'Agdid Admin',
+    customDomain: ''
   });
+  const [tenantOwnerId, setTenantOwnerId] = useState<string | null>(null);
   const [isLoadingPages, setIsLoadingPages] = useState(true);
   const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([]);
   const [isMapOpen, setIsMapOpen] = useState(false);
@@ -661,7 +663,7 @@ export const App: React.FC = () => {
     if (!supabase) return;
     setIsLoadingPages(true);
     
-    const ownerId = (import.meta as any).env?.VITE_OWNER_ID;
+    const ownerId = tenantOwnerId || session?.id || (import.meta as any).env?.VITE_OWNER_ID;
     
     let query = supabase
         .from('landing_pages')
@@ -688,7 +690,7 @@ export const App: React.FC = () => {
         setPublicPages(mapped as LandingPageRow[]);
     }
     setIsLoadingPages(false);
-  }, []);
+  }, [tenantOwnerId, session?.id]);
 
   const fetchAllAdminPages = useCallback(async () => {
     if (isSupabaseConfigured() && supabase && session) {
@@ -725,6 +727,23 @@ export const App: React.FC = () => {
   useEffect(() => {
     const init = async () => {
         if (isSupabaseConfigured() && supabase) {
+            // 0. Domain mapping check (Tenant Resolution)
+            let resolvedTenantId = null;
+            const currentHost = window.location.hostname;
+            if (currentHost !== 'localhost' && !currentHost.includes('127.0.0.1')) {
+                // Try to find a user who has claimed this domain
+                const { data: domainData } = await supabase
+                    .from('site_settings')
+                    .select('user_id')
+                    .contains('config', { customDomain: currentHost })
+                    .maybeSingle();
+                
+                if (domainData) {
+                    resolvedTenantId = domainData.user_id;
+                    setTenantOwnerId(resolvedTenantId);
+                }
+            }
+
             // 1. Auth check
             const { data: { session: currentSession } } = await supabase.auth.getSession();
             if (currentSession) {
@@ -738,7 +757,8 @@ export const App: React.FC = () => {
 
             // 2. Settings check
             const ownerId = (import.meta as any).env?.VITE_OWNER_ID;
-            const settingsUserId = currentSession?.user.id || ownerId;
+            // The settings user ID should prioritize the resolved tenant, then the logged-in user, then the env ownerId
+            const settingsUserId = resolvedTenantId || currentSession?.user.id || ownerId;
             
             if (settingsUserId) {
                 const { data: settingsData } = await supabase
@@ -759,9 +779,9 @@ export const App: React.FC = () => {
                 let query = supabase.from('landing_pages').select('*');
                 
                 // Isolation filter
-                const ownerId = (import.meta as any).env?.VITE_OWNER_ID;
-                if (ownerId) {
-                    query = query.eq('user_id', ownerId);
+                const activeOwnerId = resolvedTenantId || currentSession?.user.id || ownerId;
+                if (activeOwnerId) {
+                    query = query.eq('user_id', activeOwnerId);
                 }
 
                 if (slugParam) {
@@ -1260,6 +1280,11 @@ export const App: React.FC = () => {
                     <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Nome Pannello Admin (ex: Agdid Admin)</label>
                         <input type="text" value={siteConfig.adminPanelName || ''} onChange={e => setSiteConfig({...siteConfig, adminPanelName: e.target.value})} className="w-full border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-emerald-500 outline-none transition-all" placeholder="Agdid Admin"/>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Dominio Personalizzato (es. miosito.vercel.app)</label>
+                        <input type="text" value={siteConfig.customDomain || ''} onChange={e => setSiteConfig({...siteConfig, customDomain: e.target.value})} className="w-full border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-emerald-500 outline-none transition-all" placeholder="miosito.vercel.app"/>
+                        <p className="text-xs text-slate-400 mt-1">Inserisci il dominio generato da Vercel per collegare questo account al dominio specifico.</p>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>

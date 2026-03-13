@@ -25,6 +25,7 @@ export interface SiteConfig {
   browserTitle?: string; // NEW: Browser Tab Title (ex: A.T)
   faviconUrl?: string; // NEW: Favicon via URL
   adminPanelName?: string; // NEW: Admin Panel Branding (ex: Agdid Admin)
+  customDomain?: string; // NEW: Custom domain or Vercel URL
 }
 
 export interface ProductDetails {
